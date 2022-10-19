@@ -5,6 +5,8 @@ extern "C" {
 #include <esp_event.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
+#include <freertos/event_groups.h>
+
 
 #include <esp_log.h>
 #include <esp_wifi.h>
@@ -27,8 +29,10 @@ class WifiMgr {
 
      bool _supporting_services_initialized;
      void setup_supporting_services();
-     static void wifi_init_sta(void);
-     static void get_device_service_name(char *service_name, size_t max);
+     void wifi_init_sta(void);
+     void get_device_service_name(char *service_name, size_t max);
+
+     EventGroupHandle_t _event_group;
 };
 
 #endif

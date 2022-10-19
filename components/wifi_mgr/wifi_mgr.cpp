@@ -1,11 +1,15 @@
 #include <stdio.h>
 #include "wifi_mgr.hpp"
 
+
 static const char *TAG = "wifi_mgr";
 
 WifiMgr::WifiMgr() {
   _supporting_services_initialized = false;
   setup_supporting_services();
+
+  _event_group = xEventGroupCreate();
+  assert(_event_group != NULL);
 }
 
 void WifiMgr::setup_supporting_services() {
