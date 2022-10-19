@@ -3,13 +3,18 @@
 
 
 static const char *TAG = "wifi_mgr";
+EventGroupHandle_t WifiMgr::_event_group = NULL;
+EventBits_t WifiMgr::_WifiConnectedBits = 0x01;
 
 WifiMgr::WifiMgr() {
   _supporting_services_initialized = false;
   setup_supporting_services();
 
-  _event_group = xEventGroupCreate();
-  assert(_event_group != NULL);
+  WifiMgr::_event_group = xEventGroupCreate();
+  assert(WifiMgr::_event_group != NULL);
+
+  xEventGroupClearBits(WifiMgr::_event_group, WifiMgr::_WifiConnectedBits);
+
 }
 
 void WifiMgr::setup_supporting_services() {
@@ -44,16 +49,17 @@ void WifiMgr::setup_supporting_services() {
     ESP_ERROR_CHECK(esp_event_handler_register(WIFI_EVENT, ESP_EVENT_ANY_ID, &WifiMgr::event_handler, NULL));
     ESP_ERROR_CHECK(esp_event_handler_register(IP_EVENT, IP_EVENT_STA_GOT_IP, &WifiMgr::event_handler, NULL));
 
+    /* Initialize Wi-Fi including netif with default config */
+    esp_netif_create_default_wifi_sta();
+    wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
+    ESP_ERROR_CHECK(esp_wifi_init(&cfg));
+
     _supporting_services_initialized = true;
     ESP_LOGI(TAG, "Supporting services successfully setup");
 
 }
 
 void WifiMgr::provision(const char *pop, bool forceProvision) {
-    /* Initialize Wi-Fi including netif with default config */
-    esp_netif_create_default_wifi_sta();
-    wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
-    ESP_ERROR_CHECK(esp_wifi_init(&cfg));
 
     /* Configuration for the provisioning manager */
     wifi_prov_mgr_config_t config = {
@@ -72,6 +78,9 @@ void WifiMgr::provision(const char *pop, bool forceProvision) {
 
     if (!provisioned || forceProvision) {
         ESP_LOGI(TAG, "Starting provisioning");
+
+        xEventGroupClearBits(WifiMgr::_event_group, WifiMgr::_WifiConnectedBits);
+
 
         /* What is the Device Service Name that we want
          * This translates to :
@@ -138,6 +147,13 @@ void WifiMgr::provision(const char *pop, bool forceProvision) {
     }
 }
 
+void WifiMgr::waitForConnection() {
+  EventBits_t bits = 0x00;
+  while ((bits & WifiMgr::_WifiConnectedBits) == 0) {
+    bits = xEventGroupWaitBits(WifiMgr::_event_group, WifiMgr::_WifiConnectedBits, pdFALSE, pdTRUE, 500 / portTICK_PERIOD_MS );
+  }
+}
+
 void WifiMgr::wifi_init_sta(void)
 {
     /* Start Wi-Fi in station mode */
@@ -196,8 +212,10 @@ void WifiMgr::event_handler(void* arg, esp_event_base_t event_base,
     } else if (event_base == IP_EVENT && event_id == IP_EVENT_STA_GOT_IP) {
         ip_event_got_ip_t* event = (ip_event_got_ip_t*) event_data;
         ESP_LOGI(TAG, "Connected with IP Address:" IPSTR, IP2STR(&event->ip_info.ip));
+        xEventGroupSetBits(WifiMgr::_event_group, WifiMgr::_WifiConnectedBits);
     } else if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_DISCONNECTED) {
         ESP_LOGI(TAG, "Disconnected. Connecting to the AP again...");
+        xEventGroupClearBits(WifiMgr::_event_group, WifiMgr::_WifiConnectedBits);
         esp_wifi_connect();
     }
 }

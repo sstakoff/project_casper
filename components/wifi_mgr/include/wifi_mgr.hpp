@@ -23,6 +23,7 @@ class WifiMgr {
   public:
     WifiMgr();
     void provision(const char *pop, bool forceProvision = false);
+    void waitForConnection();
   private:
     static void event_handler(void* arg, esp_event_base_t event_base,
                           int32_t event_id, void* event_data);
@@ -32,7 +33,8 @@ class WifiMgr {
      void wifi_init_sta(void);
      void get_device_service_name(char *service_name, size_t max);
 
-     EventGroupHandle_t _event_group;
+     static EventGroupHandle_t _event_group;
+     static EventBits_t _WifiConnectedBits;
 };
 
 #endif
