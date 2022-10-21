@@ -31,14 +31,15 @@ void WifiMgr::setup_supporting_services() {
     ESP_ERROR_CHECK(esp_netif_init());
 
     /* Initialize the default event loop if a loop wasn't provided */
+    // If default event loop already exists, ret will be ESP_ERR_INVALID_STATE.
+    // In that case, we just ignore
+
     if (this->event_loop == NULL) {
       ret = esp_event_loop_create_default();
       if (ret != ESP_ERR_INVALID_STATE) {
         ESP_ERROR_CHECK(ret);
       }
     }
-    // If default event loop already exists, ret will be ESP_ERR_INVALID_STATE.
-    // In that case, we just ignore
     
 
     /* Register our event handler for Wi-Fi, IP and Provisioning related events */
