@@ -1,20 +1,14 @@
 #include <stdio.h>
 #include "wifi_mgr.hpp"
 
-
 static const char *TAG = "wifi_mgr";
-EventGroupHandle_t WifiMgr::_event_group = NULL;
-EventBits_t WifiMgr::_WifiConnectedBits = 0x01;
+esp_event_base_t WifiMgr::CASPER_WIFI_EVENT = (esp_event_base_t)"CASPER_WIFI_EVENT";
+esp_event_loop_handle_t *WifiMgr::event_loop = NULL;
 
-WifiMgr::WifiMgr() {
+WifiMgr::WifiMgr(esp_event_loop_handle_t *event_loop) {
+  WifiMgr::event_loop = event_loop;
   _supporting_services_initialized = false;
   setup_supporting_services();
-
-  WifiMgr::_event_group = xEventGroupCreate();
-  assert(WifiMgr::_event_group != NULL);
-
-  xEventGroupClearBits(WifiMgr::_event_group, WifiMgr::_WifiConnectedBits);
-
 }
 
 void WifiMgr::setup_supporting_services() {
@@ -36,13 +30,16 @@ void WifiMgr::setup_supporting_services() {
     /* Initialize TCP/IP */
     ESP_ERROR_CHECK(esp_netif_init());
 
-    /* Initialize the event loop */
-    ret = esp_event_loop_create_default();
+    /* Initialize the default event loop if a loop wasn't provided */
+    if (this->event_loop == NULL) {
+      ret = esp_event_loop_create_default();
+      if (ret != ESP_ERR_INVALID_STATE) {
+        ESP_ERROR_CHECK(ret);
+      }
+    }
     // If default event loop already exists, ret will be ESP_ERR_INVALID_STATE.
     // In that case, we just ignore
-    if (ret != ESP_ERR_INVALID_STATE) {
-      ESP_ERROR_CHECK(ret);
-    }
+    
 
     /* Register our event handler for Wi-Fi, IP and Provisioning related events */
     ESP_ERROR_CHECK(esp_event_handler_register(WIFI_PROV_EVENT, ESP_EVENT_ANY_ID, &WifiMgr::event_handler, NULL));
@@ -79,8 +76,7 @@ void WifiMgr::provision(const char *pop, bool forceProvision) {
     if (!provisioned || forceProvision) {
         ESP_LOGI(TAG, "Starting provisioning");
 
-        xEventGroupClearBits(WifiMgr::_event_group, WifiMgr::_WifiConnectedBits);
-
+        post_event(WIFI_DISCONNECTED);
 
         /* What is the Device Service Name that we want
          * This translates to :
@@ -147,13 +143,6 @@ void WifiMgr::provision(const char *pop, bool forceProvision) {
     }
 }
 
-void WifiMgr::waitForConnection() {
-  EventBits_t bits = 0x00;
-  while ((bits & WifiMgr::_WifiConnectedBits) == 0) {
-    bits = xEventGroupWaitBits(WifiMgr::_event_group, WifiMgr::_WifiConnectedBits, pdFALSE, pdTRUE, 500 / portTICK_PERIOD_MS );
-  }
-}
-
 void WifiMgr::wifi_init_sta(void)
 {
     /* Start Wi-Fi in station mode */
@@ -207,15 +196,23 @@ void WifiMgr::event_handler(void* arg, esp_event_base_t event_base,
                 break;
         }
     } else if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_START) {
-        ESP_LOGI(TAG, "STA Started - connecting to WIFI");
-        esp_wifi_connect();
+      ESP_LOGI(TAG, "STA Started - connecting to WIFI");
+      esp_wifi_connect();
     } else if (event_base == IP_EVENT && event_id == IP_EVENT_STA_GOT_IP) {
-        ip_event_got_ip_t* event = (ip_event_got_ip_t*) event_data;
-        ESP_LOGI(TAG, "Connected with IP Address:" IPSTR, IP2STR(&event->ip_info.ip));
-        xEventGroupSetBits(WifiMgr::_event_group, WifiMgr::_WifiConnectedBits);
+      ip_event_got_ip_t* event = (ip_event_got_ip_t*) event_data;
+      ESP_LOGI(TAG, "Connected with IP Address:" IPSTR, IP2STR(&event->ip_info.ip));
+      post_event(WIFI_CONNECTED);
     } else if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_DISCONNECTED) {
-        ESP_LOGI(TAG, "Disconnected. Connecting to the AP again...");
-        xEventGroupClearBits(WifiMgr::_event_group, WifiMgr::_WifiConnectedBits);
-        esp_wifi_connect();
+      post_event(WIFI_DISCONNECTED);
+      ESP_LOGI(TAG, "Disconnected. Connecting to the AP again...");
+      esp_wifi_connect();
     }
+}
+
+void WifiMgr::post_event(CasperWifiEvent_t event) {
+  if (event_loop == NULL) {
+    ESP_ERROR_CHECK(esp_event_post(WifiMgr::CASPER_WIFI_EVENT, event, NULL, 0, 2000 / portTICK_PERIOD_MS));
+  } else {
+    ESP_ERROR_CHECK(esp_event_post_to(event_loop, WifiMgr::CASPER_WIFI_EVENT, event, NULL, 0, 2000 / portTICK_PERIOD_MS));
+  }
 }
